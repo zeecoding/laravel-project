@@ -1,0 +1,27 @@
+---
+# ---------- GitHub source ----------
+repo_url: "https://github.com/zeecoding/laravel-project.git"
+repo_branch: "main"
+
+# ---------- Kubernetes ----------
+namespace: laravel
+manifest_dir: "{{ ansible_env.HOME }}/laravel-k8s"
+node_port: 30080
+app_replicas: 1
+health_path: "/students"   # hits Laravel + MySQL, returns 200
+
+# ---------- Public images (no Docker build needed) ----------
+php_image: "serversideup/php:8.4-fpm-nginx"   # must satisfy composer.json "php" requirement
+mysql_image: "mysql:8.4"
+git_image: "alpine/git:latest"
+wait_image: "busybox:1.36"
+
+# ---------- Database tier ----------
+# For the report/bonus: encrypt with  ansible-vault encrypt_string 'value' --name db_password
+db_name: student_management
+db_user: student_app
+db_password: "StudentApp2026"
+db_root_password: "RootPass2026"
+
+# ---------- Laravel APP_KEY (generated once, stored in ansible/.app_key) ----------
+app_key: "base64:{{ lookup('password', playbook_dir ~ '/.app_key chars=ascii_letters,digits length=32') | b64encode }}"

@@ -1,0 +1,32 @@
+---
+# Playbook 2: render the Kubernetes manifests from templates and apply them
+- name: Deploy the Laravel three-tier application on Kubernetes
+  hosts: k8s_host
+  gather_facts: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  vars:
+    manifests:
+      - 00-namespace.yml
+      - 01-config.yml
+      - 02-mysql.yml
+      - 03-laravel.yml
+  tasks:
+    - name: Create the manifest directory
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render manifests from Jinja2 templates
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ manifest_dir }}/{{ item }}"
+        mode: "0600"
+      loop: "{{ manifests }}"
+
+    - name: Apply manifests in order (namespace, config, database tier, app tier)
+      ansible.builtin.command: "kubectl apply -f {{ manifest_dir }}/{{ item }}"
+      loop: "{{ manifests }}"
+      register: apply_result
+      changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"

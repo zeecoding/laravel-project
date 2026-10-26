@@ -1,0 +1,107 @@
+# ---------- Application + presentation tier: Laravel (nginx + PHP-FPM) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laravel-app
+  namespace: {{ namespace }}
+spec:
+  replicas: {{ app_replicas }}
+  selector:
+    matchLabels:
+      app: laravel-app
+  template:
+    metadata:
+      labels:
+        app: laravel-app
+    spec:
+      securityContext:
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+      initContainers:
+        # 1. do not start before the database accepts connections
+        - name: wait-for-mysql
+          image: {{ wait_image }}
+          command: ["sh", "-c", "until nc -z mysql 3306; do echo waiting for mysql; sleep 3; done"]
+        # 2. pull the application code from GitHub
+        - name: git-clone
+          image: {{ git_image }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              find /var/www/html -mindepth 1 -delete
+              git clone --depth 1 --branch {{ repo_branch }} {{ repo_url }} /var/www/html
+          env:
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: app-code
+              mountPath: /var/www/html
+        # 3. install dependencies, write .env from the ConfigMap/Secret, run migrations
+        - name: composer-and-migrate
+          image: {{ php_image }}
+          workingDir: /var/www/html
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+              mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
+              env | grep -E '^(APP_|DB_|SESSION_|CACHE_|QUEUE_|LOG_)' > .env
+              php artisan migrate --force
+          env:
+            - name: HOME
+              value: /tmp
+            - name: COMPOSER_HOME
+              value: /tmp/composer
+          envFrom:
+            - configMapRef:
+                name: laravel-config
+            - secretRef:
+                name: laravel-secret
+          volumeMounts:
+            - name: app-code
+              mountPath: /var/www/html
+      containers:
+        - name: laravel
+          image: {{ php_image }}
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: laravel-config
+            - secretRef:
+                name: laravel-secret
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: 128Mi
+          volumeMounts:
+            - name: app-code
+              mountPath: /var/www/html
+      volumes:
+        - name: app-code
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: laravel-app
+  namespace: {{ namespace }}
+spec:
+  type: NodePort
+  selector:
+    app: laravel-app
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: {{ node_port }}

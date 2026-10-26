@@ -1,0 +1,48 @@
+---
+# Playbook 3: wait for the rollout and prove every tier works
+- name: Verify the deployment
+  hosts: k8s_host
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Wait for the MySQL (database tier) to be ready
+      ansible.builtin.command: "kubectl -n {{ namespace }} rollout status statefulset/mysql --timeout=300s"
+      changed_when: false
+
+    - name: Wait for the Laravel (application tier) rollout
+      ansible.builtin.command: "kubectl -n {{ namespace }} rollout status deployment/laravel-app --timeout=900s"
+      changed_when: false
+
+    - name: List pods, services and volumes
+      ansible.builtin.command: "kubectl -n {{ namespace }} get pods,svc,pvc -o wide"
+      register: k8s_objects
+      changed_when: false
+
+    - name: Print cluster objects
+      ansible.builtin.debug:
+        var: k8s_objects.stdout_lines
+
+    - name: Show the tables created by Laravel migrations in MySQL
+      ansible.builtin.command: >
+        kubectl -n {{ namespace }} exec mysql-0 -- sh -c
+        'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SHOW TABLES;"'
+      register: db_tables
+      changed_when: false
+
+    - name: Print database tables
+      ansible.builtin.debug:
+        var: db_tables.stdout_lines
+
+    - name: Check that the application answers over HTTP (presentation tier)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_port }}{{ health_path }}"
+        follow_redirects: none
+        status_code: [200, 301, 302]
+      register: http_check
+      until: http_check.status is defined and http_check.status in [200, 301, 302]
+      retries: 12
+      delay: 10
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: "HTTP {{ http_check.status }} - open http://<EC2-PUBLIC-IP>:{{ node_port }}{{ health_path }} in the browser"

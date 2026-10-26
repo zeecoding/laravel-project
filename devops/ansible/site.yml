@@ -1,0 +1,4 @@
+---
+- import_playbook: 01-prepare.yml
+- import_playbook: 02-deploy.yml
+- import_playbook: 03-verify.yml
